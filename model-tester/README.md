@@ -27,8 +27,6 @@ python -m venv .venv
 
 产物为 `dist\NvidiaModelTester.exe`（onefile + windowed，已通过 `--add-data "config;config"` 内置 `config/models.json` 模型清单）。
 
-仓库根目录的 `model_test_mio.csv` 是一份**已脱敏**的示例输出（provider 账号标识已替换为 `***`）。
-
 ## 安全提示
 
 - Provider 配置（含 **API Key 明文**）保存在 `~/.nvidia_model_tester/providers.json`。请勿在多用户机器或会被同步/备份到不受控位置的家目录上使用；必要时删除该文件即可清除 Key。
