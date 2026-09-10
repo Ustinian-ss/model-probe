@@ -1,6 +1,6 @@
 # NVIDIA API Key 轮换运维 Runbook
 
-> 项目：本目录（`F:\projects\nvidia-tools\key-manager`；历史路径曾为 `F:\AI agent code\morekey` / `F:\morekey`，均已迁移）
+> 项目：本目录（`F:\projects\model-probe\key-manager`；历史路径 `F:\projects\nvidia-tools` / `F:\AI agent code\morekey` / `F:\morekey`，均已迁移）
 > 适用对象：日常运维 / 应急响应 / 安全事件
 > 当前 Key 数：**11**（每次轮换目标：先 +1 后 -1，新旧并存灰度）
 
@@ -30,7 +30,7 @@
 1. **操作员**：拥有 [https://org.ngc.nvidia.com/setup/api-keys](https://org.ngc.nvidia.com/setup/api-keys) 的管理员/可生成 Key 权限的账号。
 2. **本地环境**：本机有项目的写权限，且 `.env` 的 ACL 仅当前用户可读写（当前已配置为 `USTINIAN\28102:(R,W)`）。
 3. **代码就绪**：`key_manager.py` 已是最新版（具备失败冷却 + 轮询切换能力）。
-4. **Git 泄漏面**：项目已纳入本地 git 仓库（`F:\projects\nvidia-tools`），`.env` 已在 `.gitignore` 中且未被跟踪（已确认）。
+4. **Git 泄漏面**：项目已纳入 git 仓库（`F:\projects\model-probe`），`.env` 已在 `.gitignore` 中且未被跟踪（已确认）。
 
 ---
 
