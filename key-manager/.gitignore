@@ -1,0 +1,8 @@
+# 密钥与本地环境
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

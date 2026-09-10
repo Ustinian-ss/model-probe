@@ -1,0 +1,41 @@
+{
+  "models": [
+    { "id": "deepseek-ai/deepseek-v4-flash",            "vendor": "deepseek-ai", "name": "deepseek-v4-flash" },
+    { "id": "deepseek-ai/deepseek-v4-pro-0813",         "vendor": "deepseek-ai", "name": "deepseek-v4-pro-0813" },
+    { "id": "deepseek-ai/deepseek-chat",                "vendor": "deepseek-ai", "name": "deepseek-chat" },
+    { "id": "deepseek-ai/deepseek-coder",               "vendor": "deepseek-ai", "name": "deepseek-coder" },
+
+    { "id": "google/diffusiongemma-26b-a4b-it",         "vendor": "google",      "name": "diffusiongemma-26b-a4b-it" },
+    { "id": "google/gemma-4-31b-it",                    "vendor": "google",      "name": "gemma-4-31b-it" },
+    { "id": "google/gemma-3-27b-it",                    "vendor": "google",      "name": "gemma-3-27b-it" },
+    { "id": "google/gemma-3-9b-it",                     "vendor": "google",      "name": "gemma-3-9b-it" },
+    { "id": "google/embeddinggemma-300m",               "vendor": "google",      "name": "embeddinggemma-300m" },
+
+    { "id": "meta/llama-3.2-11b-vision-instruct",       "vendor": "meta",        "name": "llama-3.2-11b-vision-instruct" },
+    { "id": "meta/llama-3.3-70b-instruct",              "vendor": "meta",        "name": "llama-3.3-70b-instruct" },
+    { "id": "meta/llama-3.1-8b-instruct",               "vendor": "meta",        "name": "llama-3.1-8b-instruct" },
+    { "id": "meta/llama-3.1-405b-instruct",             "vendor": "meta",        "name": "llama-3.1-405b-instruct" },
+    { "id": "meta/llama-4-maverick-17b-128e-instruct",  "vendor": "meta",        "name": "llama-4-maverick-17b-128e-instruct" },
+
+    { "id": "mistralai/mistral-large-2",                "vendor": "mistralai",   "name": "mistral-large-2" },
+    { "id": "mistralai/mistral-7b-instruct",            "vendor": "mistralai",   "name": "mistral-7b-instruct" },
+    { "id": "mistralai/mixtral-8x7b-instruct",          "vendor": "mistralai",   "name": "mixtral-8x7b-instruct" },
+    { "id": "mistralai/mistral-nemotron",               "vendor": "mistralai",   "name": "mistral-nemotron" },
+
+    { "id": "qwen/qwen3-235b-a22b",                     "vendor": "qwen",        "name": "qwen3-235b-a22b" },
+    { "id": "qwen/qwen3-coder-480b-a35b-instruct",      "vendor": "qwen",        "name": "qwen3-coder-480b-a35b-instruct" },
+    { "id": "qwen/qwen2.5-coder-32b-instruct",          "vendor": "qwen",        "name": "qwen2.5-coder-32b-instruct" },
+    { "id": "qwen/qwen2-vl-7b-instruct",                "vendor": "qwen",        "name": "qwen2-vl-7b-instruct" },
+
+    { "id": "nvidia/llama-3.1-nemotron-70b-instruct",   "vendor": "nvidia",      "name": "llama-3.1-nemotron-70b-instruct" },
+    { "id": "nvidia/nemotron-4-340b-instruct",          "vendor": "nvidia",      "name": "nemotron-4-340b-instruct" },
+    { "id": "nvidia/cosmos-reason-1-7b",                "vendor": "nvidia",      "name": "cosmos-reason-1-7b" },
+
+    { "id": "openai/gpt-oss-120b",                      "vendor": "openai",      "name": "gpt-oss-120b" },
+    { "id": "openai/gpt-oss-20b",                       "vendor": "openai",      "name": "gpt-oss-20b" },
+
+    { "id": "bytedance/seed-1-6b-thinking",             "vendor": "bytedance",   "name": "seed-1-6b-thinking" },
+    { "id": "moonshotai/kimi-k2-instruct",              "vendor": "moonshotai",  "name": "kimi-k2-instruct" },
+    { "id": "zhipu/glm-4-9b-chat",                      "vendor": "zhipu",       "name": "glm-4-9b-chat" }
+  ]
+}
