@@ -29,9 +29,22 @@ class ProviderTester:
         self.provider = provider
         self.config = config
         self.cancelled = False
+        # 批量测试复用同一个 httpx.Client（连接池 + TLS 会话复用），
+        # 避免每个请求重建连接导致延迟测量虚高。httpx.Client 线程安全。
+        self._client: httpx.Client | None = None
 
     def cancel(self) -> None:
         self.cancelled = True
+
+    def close(self) -> None:
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+    def _get_client(self) -> httpx.Client:
+        if self._client is None:
+            self._client = httpx.Client(timeout=self.provider.timeout_seconds)
+        return self._client
 
     def test_model(self, item: ModelItem) -> ModelItem:
         item.status = "running"
@@ -90,10 +103,10 @@ class ProviderTester:
 
         start = time.perf_counter()
         try:
-            with httpx.Client(timeout=self.provider.timeout_seconds) as client:
-                if stream:
-                    return self._request_stream(client, url, headers, payload, start)
-                return self._request_non_stream(client, url, headers, payload, start)
+            client = self._get_client()
+            if stream:
+                return self._request_stream(client, url, headers, payload, start)
+            return self._request_non_stream(client, url, headers, payload, start)
         except Exception as exc:
             return self._result(False, exc, start)
 
@@ -186,8 +199,8 @@ class ProviderTester:
             "Content-Type": "application/json",
         }
         try:
-            with httpx.Client(timeout=self.provider.timeout_seconds) as client:
-                response = client.get(url, headers=headers)
+            client = self._get_client()
+            response = client.get(url, headers=headers)
             if response.status_code >= 400:
                 return []
             data = response.json()

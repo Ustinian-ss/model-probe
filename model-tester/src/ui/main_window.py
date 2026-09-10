@@ -16,12 +16,11 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QRadioButton,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from model_store import load_model_items
+import model_store
 from models import ModelItem
 from providers import (
     Provider,
@@ -35,7 +34,9 @@ from ui.provider_dialog import ProviderDialog
 
 
 class TestSignals(QObject):
-    row_updated = Signal(int, object)
+    # 传递 ModelItem 引用本身（test_model 原地修改并返回同一对象），
+    # 避免用“选中子集下标”回写 self.items 造成错位（修复部分勾选时结果写错行的 bug）
+    row_updated = Signal(object)
     finished = Signal()
     progress = Signal(int, int, int, int)
 
@@ -71,29 +72,30 @@ class TestWorker(QThread):
             max_workers=self.provider.max_workers
         ) as executor:
             future_map = {
-                executor.submit(self._run_one, index, item): (index, item)
-                for index, item in enumerate(selected)
+                executor.submit(self._run_one, item): item
+                for item in selected
             }
 
             for future in concurrent.futures.as_completed(future_map):
                 if self.tester.cancelled:
                     break
 
-                index, item = future_map[future]
+                item = future_map[future]
                 result = future.result()
-                self.items[index] = result
                 done += 1
                 if result.status == "success":
                     success += 1
                 elif result.status == "failed":
                     failed += 1
 
-                self.signals.row_updated.emit(index, result)
+                self.signals.row_updated.emit(result)
                 self.signals.progress.emit(done, total, success, failed)
 
+        self.tester.close()
         self.signals.finished.emit()
 
-    def _run_one(self, index: int, item: ModelItem) -> ModelItem:
+    def _run_one(self, item: ModelItem) -> ModelItem:
+        # test_model 原地修改 item 并返回同一对象，self.items 无需按下标回写
         return self.tester.test_model(item)
 
     def stop(self) -> None:
@@ -114,12 +116,16 @@ class FetchWorker(QThread):
         self.signals = FetchSignals()
 
     def run(self) -> None:
+        tester = None
         try:
             tester = ProviderTester(self.provider, TestConfig())
             ids = tester.fetch_models()
             self.signals.succeeded.emit(ids)
         except Exception as exc:
             self.signals.failed.emit(str(exc))
+        finally:
+            if tester is not None:
+                tester.close()
 
 
 class MainWindow(QMainWindow):
@@ -131,7 +137,12 @@ class MainWindow(QMainWindow):
         self.provider = self.providers[0]
         self.setWindowTitle(f"测试模型连接: {self.provider.name}")
 
-        self.items = load_model_items()
+        self.items = model_store.load_model_items()
+        if not self.items and model_store.LAST_LOAD_ERROR:
+            QMessageBox.warning(
+                self, "内置模型清单缺失",
+                model_store.LAST_LOAD_ERROR + "\n\n可点击「拉取模型」从 Provider 获取清单。",
+            )
         self.visible_items: list[ModelItem] = list(self.items)
         self.worker: TestWorker | None = None
         self.fetch_worker: QThread | None = None
@@ -187,10 +198,6 @@ class MainWindow(QMainWindow):
         self.clear_results_button.setToolTip("清空所有测试状态 (Delete)")
         self.clear_results_button.clicked.connect(self._clear_results)
 
-        self.page_spin = QSpinBox()
-        self.page_spin.setRange(1, 1)
-        self.page_spin.setSuffix(" 页")
-
         self.progress_label = QLabel("待测试")
         self.progress_label.setStyleSheet("font-weight: bold;")
 
@@ -198,7 +205,6 @@ class MainWindow(QMainWindow):
         self.table.set_items(self.items)
 
         self._build_layout()
-        self._update_page_spin()
         self._setup_shortcuts()
 
     def _build_layout(self) -> None:
@@ -220,7 +226,6 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.copy_button)
         controls.addWidget(self.export_button)
         controls.addWidget(self.clear_results_button)
-        controls.addWidget(self.page_spin)
         controls.addWidget(self.start_button)
         controls.addWidget(self.stop_button)
 
@@ -291,11 +296,6 @@ class MainWindow(QMainWindow):
         needle = text.strip().lower()
         self.visible_items = [item for item in self.items if needle in item.id.lower()]
         self.table.set_items(self.visible_items)
-        self._update_page_spin(len(self.visible_items))
-
-    def _update_page_spin(self, count: int | None = None) -> None:
-        count = count or len(self.items)
-        self.page_spin.setRange(1, max(1, count // 30 + (count % 30 > 0)))
 
     def _start_test(self) -> None:
         if not self.provider.api_key:
@@ -325,8 +325,8 @@ class MainWindow(QMainWindow):
         if self.worker:
             self.worker.stop()
 
-    def _on_row_updated(self, row: int, item: ModelItem) -> None:
-        self.table.update_row(row, item)
+    def _on_row_updated(self, item: ModelItem) -> None:
+        self.table.update_item(item)
 
     def _on_progress(self, done: int, total: int, success: int, failed: int) -> None:
         self.progress_label.setText(
@@ -367,8 +367,9 @@ class MainWindow(QMainWindow):
     def _apply_table_selection(self) -> None:
         selected_ids = set(self.table.selected_ids())
         for item in self.items:
-            if item.id in selected_ids:
-                item.selected = True
+            # 必须双向同步：筛选时 selected_ids() 只含可见行，
+            # 只置 True 不置 False 会让被筛掉的行残留旧勾选状态
+            item.selected = item.id in selected_ids
             item.status = "pending"
             item.latency_ms = None
             item.streaming_supported = None
@@ -442,7 +443,6 @@ class MainWindow(QMainWindow):
         if added:
             self.visible_items = list(self.items)
             self.table.set_items(self.visible_items)
-            self._update_page_spin()
         return added
 
     # ---------- 新功能：快捷键 / 复制 / 导出 / 清空 ----------
@@ -456,16 +456,22 @@ class MainWindow(QMainWindow):
         Ctrl+Shift+R            拉取模型清单
         Ctrl+T                  开始/停止测试（按当前状态切换）
         """
-        self._shortcut_select_all = QShortcut(QKeySequence("Ctrl+A"), self)
+        # 选择类快捷键挂在表格上（WidgetWithChildrenShortcut），
+        # 避免劫持“筛选模型”输入框里的 Ctrl+A 全选文本 / Delete 删字符
+        self._shortcut_select_all = QShortcut(QKeySequence("Ctrl+A"), self.table)
+        self._shortcut_select_all.setContext(Qt.WidgetWithChildrenShortcut)
         self._shortcut_select_all.activated.connect(lambda: self.table.check_all(True))
 
-        self._shortcut_select_none = QShortcut(QKeySequence("Ctrl+D"), self)
+        self._shortcut_select_none = QShortcut(QKeySequence("Ctrl+D"), self.table)
+        self._shortcut_select_none.setContext(Qt.WidgetWithChildrenShortcut)
         self._shortcut_select_none.activated.connect(lambda: self.table.check_all(False))
 
-        self._shortcut_select_invert = QShortcut(QKeySequence("Ctrl+I"), self)
+        self._shortcut_select_invert = QShortcut(QKeySequence("Ctrl+I"), self.table)
+        self._shortcut_select_invert.setContext(Qt.WidgetWithChildrenShortcut)
         self._shortcut_select_invert.activated.connect(self.table.invert_selection)
 
-        self._shortcut_clear = QShortcut(QKeySequence("Delete"), self)
+        self._shortcut_clear = QShortcut(QKeySequence("Delete"), self.table)
+        self._shortcut_clear.setContext(Qt.WidgetWithChildrenShortcut)
         self._shortcut_clear.activated.connect(self._clear_results)
 
         self._shortcut_copy = QShortcut(QKeySequence("Ctrl+Shift+C"), self)
@@ -536,6 +542,14 @@ class MainWindow(QMainWindow):
         if not silent and self.worker and self.worker.isRunning():
             QMessageBox.warning(self, "测试进行中", "请先停止测试再清空结果。")
             return
+        if not silent and self._has_results():
+            answer = QMessageBox.question(
+                self, "清空结果",
+                "确定要清空所有模型的测试结果吗？",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
         self.table.clear_results()
         # 重新同步可见列表（_filter_items 会自动算）
         if self.search_edit.text():
@@ -545,3 +559,9 @@ class MainWindow(QMainWindow):
             self.table.set_items(self.visible_items)
         if not silent:
             self.progress_label.setText(f"已清空测试结果，待测试 {len(self.items)} 个模型")
+
+    def _has_results(self) -> bool:
+        return any(
+            it.status not in ("pending", "") or it.latency_ms is not None
+            for it in self.items
+        )

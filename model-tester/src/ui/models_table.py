@@ -56,16 +56,16 @@ class ModelsTable(QTableWidget):
         self._items = list(items)
         self._render()
 
-    def update_row(self, row: int, item: ModelItem) -> None:
-        """按可视行号更新 row。如果当前正排序，update 的是数据项，需要找到新的可视行。"""
-        # 找到该 item 在 _items 中的位置
-        try:
-            data_idx = self._items.index(item)
-        except ValueError:
-            return
-        # 找可视行：当前 _items 顺序即可视顺序（因为 set_items 是按 items 顺序）
-        visible_row = data_idx
-        self._fill_row(visible_row, item)
+    def update_item(self, item: ModelItem) -> None:
+        """按对象身份更新一行。
+
+        test_model 原地修改并返回同一 ModelItem 对象，因此用 is 身份比较定位，
+        避免 dataclass 值相等比较在两条字段完全相同的行上命中错误目标。
+        """
+        for row, existing in enumerate(self._items):
+            if existing is item:
+                self._fill_row(row, item)
+                return
 
     def selected_ids(self) -> list[str]:
         ids: list[str] = []

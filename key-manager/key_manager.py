@@ -12,7 +12,7 @@ import itertools
 import random
 import threading
 import time
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Sequence
 
 
 class KeyManager:
@@ -21,7 +21,7 @@ class KeyManager:
     strategies:
       - "round_robin" : 依次轮询
       - "random"      : 随机
-      - "weighted"    : 加权轮询，要求传入 (key, weight) 序列
+      - "weighted"    : 加权随机采样，要求传入 (key, weight) 序列，weight >= 0
     """
 
     def __init__(
@@ -34,7 +34,7 @@ class KeyManager:
         self._cooldown_until: dict[str, float] = {}
 
         if strategy == "weighted":
-            self._weighted = [(k, w) for k, w in keys]
+            self._weighted = self._parse_weighted(keys)
             self._keys = [k for k, _ in self._weighted]
         else:
             self._keys = [str(k) for k in keys]
@@ -42,16 +42,32 @@ class KeyManager:
 
         self.strategy = strategy
         self._rr = itertools.cycle(self._keys)
-        self._set_call(build_weighted_set(self._weighted) if self._weighted else None)
+        try:
+            self._func: Callable[[], str] = {
+                "round_robin": self._next_rr,
+                "random": self._next_random,
+                "weighted": self._next_weighted,
+            }[strategy]
+        except KeyError:
+            raise ValueError(
+                f"未知策略 {strategy!r}，可选：round_robin / random / weighted"
+            ) from None
 
-    def _set_call(self, weighted_set) -> None:
-        if weighted_set:
-            self._weighted_set = weighted_set
-        self._func: Callable[[], str] = {
-            "round_robin": self._next_rr,
-            "random": self._next_random,
-            "weighted": self._next_weighted,
-        }[self.strategy]
+    @staticmethod
+    def _parse_weighted(keys: Sequence[str | tuple[str, int]]) -> list[tuple[str, int]]:
+        """校验 weighted 入参：必须是 (key, weight>=0) 序列，给出可读错误。"""
+        weighted: list[tuple[str, int]] = []
+        for entry in keys:
+            if not isinstance(entry, tuple) or len(entry) != 2:
+                raise ValueError(
+                    "weighted 策略要求传入 (key, weight) 元组序列，"
+                    f"例如 [('nvapi-a', 5), ('nvapi-b', 1)]；收到：{entry!r}"
+                )
+            key, weight = entry
+            if not isinstance(weight, (int, float)) or weight < 0:
+                raise ValueError(f"权重必须是非负数，收到 ({key!r}, {weight!r})")
+            weighted.append((str(key), weight))
+        return weighted
 
     @property
     def keys(self) -> list[str]:
@@ -75,6 +91,9 @@ class KeyManager:
 
     def _next_weighted(self) -> str:
         total = sum(w for _, w in self._weighted)
+        if total <= 0:
+            # 所有权重为 0 时退化为均匀随机，避免 random.uniform(0, 0) 恒选第一个
+            return random.choice(self._keys)
         r = random.uniform(0, total)
         for key, w in self._weighted:
             r -= w
@@ -102,8 +121,3 @@ class KeyManager:
     def stats(self) -> dict[str, int]:
         with self._lock:
             return dict(self._failures)
-
-
-def build_weighted_set(pairs: Iterable[tuple[str, int]]) -> list[str]:
-    """把 [("a", 5), ("b", 1)] 展开成可轮询的重复列表。"""
-    return [k for k, w in pairs for _ in range(max(1, int(w)))]

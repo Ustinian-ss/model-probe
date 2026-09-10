@@ -56,19 +56,28 @@ class NvidiaClient:
         return OpenAI(base_url=self.base_url, api_key=key)
 
     def chat(self, messages: list[dict], **kwargs) -> str:
-        """发送对话请求，返回模型回复文本。失败自动换 Key 重试。"""
+        """发送对话请求，返回模型回复文本。失败自动换 Key 重试。
+
+        - 400/422 等参数类错误：确定性失败，直接抛出，不浪费其他 Key；
+        - 401/403/404/429/5xx：可能是 Key/账号/服务端问题（如"该账号无此模型"），换 Key 重试。
+        """
         last_error: Exception | None = None
         for _ in range(self.max_attempts):
             key = self.manager.next()
             try:
+                call_kwargs = dict(kwargs)
+                call_kwargs.setdefault("model", self.model)
                 resp = self._client(key).chat.completions.create(
-                    model=kwargs.pop("model", self.model),
                     messages=messages,
-                    **kwargs,
+                    **call_kwargs,
                 )
                 self.manager.report_success(key)
                 return resp.choices[0].message.content or ""
             except Exception as exc:  # noqa: BLE001 —— 统一处理，避免泄漏 Key
+                status = getattr(exc, "status_code", None)
+                if status in (400, 422):
+                    # 客户端参数类错误（400/404/422…）：换 Key 也一样失败
+                    raise
                 self.manager.report_failure(key, cooldown_seconds=self.cooldown_seconds)
                 last_error = exc
                 time.sleep(0.5)

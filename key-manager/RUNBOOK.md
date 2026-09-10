@@ -1,6 +1,6 @@
 # NVIDIA API Key 轮换运维 Runbook
 
-> 项目：`F:\AI agent code\morekey`（原路径 `F:\morekey`，已合并至 AI agent code 目录）
+> 项目：本目录（`F:\projects\nvidia-tools\key-manager`；历史路径曾为 `F:\AI agent code\morekey` / `F:\morekey`，均已迁移）
 > 适用对象：日常运维 / 应急响应 / 安全事件
 > 当前 Key 数：**11**（每次轮换目标：先 +1 后 -1，新旧并存灰度）
 
@@ -30,7 +30,7 @@
 1. **操作员**：拥有 [https://org.ngc.nvidia.com/setup/api-keys](https://org.ngc.nvidia.com/setup/api-keys) 的管理员/可生成 Key 权限的账号。
 2. **本地环境**：本机有项目的写权限，且 `.env` 的 ACL 仅当前用户可读写（当前已配置为 `USTINIAN\28102:(R,W)`）。
 3. **代码就绪**：`key_manager.py` 已是最新版（具备失败冷却 + 轮询切换能力）。
-4. **无 Git 泄漏面**：当前项目**不是 git 仓库**（已确认），如果未来纳入版本控制，必须确保 `.env` 在 `.gitignore` 中（已配置）。
+4. **Git 泄漏面**：项目已纳入本地 git 仓库（`F:\projects\nvidia-tools`），`.env` 已在 `.gitignore` 中且未被跟踪（已确认）。
 
 ---
 
@@ -70,7 +70,7 @@ curl -sS -X POST \
 
 ### Step 3 ── 把新 Key 追加进 `.env`（**追加，不替换**）
 
-打开 `F:\AI agent code\morekey\.env`（原路径 `F:\morekey\.env`），在 `NVIDIA_API_KEYS=` 行末**追加**新 Key：
+打开**本目录下的** `.env`，在 `NVIDIA_API_KEYS=` 行末**追加**新 Key：
 
 ```
 NVIDIA_API_KEYS=nvapi-旧的1,...,nvapi-旧的N,nvapi-新的

@@ -8,6 +8,7 @@ if (-not (Test-Path $VenvPython)) {
 }
 
 & $VenvPython -m pip install -r requirements.txt
-& $VenvPython -m PyInstaller --noconfirm --onefile --windowed --name "NvidiaModelTester" src/main.py
+# --add-data 必须带上 config/models.json，否则打包后的 exe 内置模型清单为空
+& $VenvPython -m PyInstaller --noconfirm --onefile --windowed --name "NvidiaModelTester" --add-data "config;config" src/main.py
 
 Write-Host "Built: dist\NvidiaModelTester.exe"

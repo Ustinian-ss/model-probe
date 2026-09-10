@@ -1,13 +1,20 @@
 const {execSync} = require('child_process');
 const fs = require('fs');
 
+// 路径可用环境变量覆盖（默认值是作者机器的历史路径）：
+//   CC_SWITCH_DB   —— cc-switch 的 SQLite 日志库
+//   MODELS_JSON    —— 模型目录 JSON
+const DB = process.env.CC_SWITCH_DB || 'C:/Users/28102/.cc-switch/cc-switch.db';
+const MODELS = process.env.MODELS_JSON || 'F:/dpsk harness/dpdata/models.json';
+
 // Get all stats
-const out = execSync('sqlite3 "C:/Users/28102/.cc-switch/cc-switch.db" "SELECT model, COUNT(*), SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), ROUND(AVG(latency_ms),0), MAX(created_at) FROM proxy_request_logs GROUP BY model"', {encoding:'utf8'});
+const q = 'SELECT model, COUNT(*), SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), ROUND(AVG(latency_ms),0), MAX(created_at) FROM proxy_request_logs GROUP BY model';
+const out = execSync('sqlite3 "' + DB + '" "' + q + '"', {encoding:'utf8'});
 const lines = out.trim().split('\n');
 const rows = lines.map(l => { const [m,n,ok,lat,last] = l.split('|'); return {model:m, n:+n, ok:+ok, lat:+lat, last:+last}; });
 
 // Get catalog
-const cat = JSON.parse(fs.readFileSync('F:/dpsk harness/dpdata/models.json','utf8')).models;
+const cat = JSON.parse(fs.readFileSync(MODELS,'utf8')).models;
 const slugs = cat.map(x => x.slug);
 
 // Build alias map: for each slug, possible request model variants
