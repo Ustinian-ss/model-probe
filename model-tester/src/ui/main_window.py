@@ -146,6 +146,9 @@ class MainWindow(QMainWindow):
         self.visible_items: list[ModelItem] = list(self.items)
         self.worker: TestWorker | None = None
         self.fetch_worker: QThread | None = None
+        # 每个 Provider 独立维护一份模型清单（切换时互不累计）：
+        # 切走时保存当前清单，切入时恢复该 Provider 自己的清单；首次使用回退内置清单
+        self._provider_lists: dict[str, list[ModelItem]] = {}
 
         self.provider_combo = QComboBox()
         self.provider_combo.addItems([p.name for p in self.providers])
@@ -186,6 +189,12 @@ class MainWindow(QMainWindow):
         self.fetch_button = QPushButton("拉取模型")
         self.fetch_button.clicked.connect(self._start_fetch)
 
+        self.reset_list_button = QPushButton("重置列表")
+        self.reset_list_button.setToolTip(
+            "手动清空当前 Provider 的模型清单（含拉取结果），恢复内置模型清单 (Ctrl+Shift+L)"
+        )
+        self.reset_list_button.clicked.connect(self._reset_model_list)
+
         self.copy_button = QPushButton("复制 ID")
         self.copy_button.setToolTip("复制所有成功的模型 ID 到剪贴板 (Ctrl+Shift+C)")
         self.copy_button.clicked.connect(self._copy_success_ids)
@@ -223,6 +232,7 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.preferred_stream)
         controls.addWidget(self.preferred_nonstream)
         controls.addWidget(self.fetch_button)
+        controls.addWidget(self.reset_list_button)
         controls.addWidget(self.copy_button)
         controls.addWidget(self.export_button)
         controls.addWidget(self.clear_results_button)
@@ -244,12 +254,19 @@ class MainWindow(QMainWindow):
             # 如果从同一个 provider 切换到自己（重复点击），不清理
             if self.provider is self.providers[index]:
                 return
+            # 保存当前 Provider 的清单（各 Provider 独立，互不累计）
+            self._provider_lists[self.provider.name] = self.items
             self.provider = self.providers[index]
             self.setWindowTitle(f"测试模型连接: {self.provider.name}")
+            # 载入目标 Provider 自己的清单；首次使用该 Provider 则回退内置清单
+            stored = self._provider_lists.get(self.provider.name)
+            self.items = list(stored) if stored is not None else model_store.load_model_items()
+            self.visible_items = list(self.items)
+            self.table.set_items(self.visible_items)
             # 健壮性：切换 provider 后清空旧测试状态，避免误以为属于新 provider
             self._clear_results(silent=True)
             self.progress_label.setText(
-                f"已切换到 {self.provider.name}，测试状态已清空，待测试 {len(self.items)} 个模型"
+                f"已切换到 {self.provider.name}，载入 {len(self.items)} 个模型，测试状态已清空"
             )
 
     def _add_provider(self) -> None:
@@ -263,9 +280,14 @@ class MainWindow(QMainWindow):
         dialog = ProviderDialog(self.provider, self)
         if dialog.exec():
             new_provider = dialog.result_provider()
+            old_name = self.provider.name
             self.providers[self.provider_combo.currentIndex()] = new_provider
             save_providers(self.providers)
             self.provider = new_provider
+            # 改名场景：把清单缓存迁移到新名字下（清单本身不变）
+            if new_provider.name != old_name:
+                self._provider_lists.pop(old_name, None)
+                self._provider_lists[new_provider.name] = self.items
             self.provider_combo.setItemText(self.provider_combo.currentIndex(), new_provider.name)
             self.setWindowTitle(f"测试模型连接: {new_provider.name}")
             QMessageBox.information(self, "已保存", "Provider 配置已保存")
@@ -280,6 +302,8 @@ class MainWindow(QMainWindow):
         self.providers.pop(index)
         save_providers(self.providers)
         self._refresh_provider_combo(0)
+        # 刷新会触发 _change_provider 把被删 Provider 的清单写回缓存，这里清掉
+        self._provider_lists.pop(name, None)
         QMessageBox.information(self, "已删除", f"已删除 Provider: {name}")
 
     def _refresh_provider_combo(self, index: int) -> None:
@@ -422,6 +446,26 @@ class MainWindow(QMainWindow):
         self.fetch_button.setEnabled(True)
         self.fetch_button.setText("拉取模型")
 
+    def _reset_model_list(self) -> None:
+        """手动清空当前 Provider 的模型清单，恢复内置清单。
+
+        清除该 Provider 下「拉取」得到的模型与全部测试状态；
+        切换 Provider 时各自清单独立，此按钮用于把当前清单一键还原。
+        """
+        if self.worker and self.worker.isRunning():
+            QMessageBox.warning(self, "测试进行中", "请先停止测试再重置列表。")
+            return
+        if self.fetch_worker and self.fetch_worker.isRunning():
+            QMessageBox.warning(self, "正在拉取模型", "请等待拉取完成后再重置列表。")
+            return
+        removed = len(self.items)
+        self.items = model_store.load_model_items()
+        self.visible_items = list(self.items)
+        self.table.set_items(self.visible_items)
+        self.progress_label.setText(
+            f"已重置列表（移除 {removed} 个，恢复内置 {len(self.items)} 个），待测试"
+        )
+
     def _merge_items(self, ids: list[str]) -> int:
         """把 provider 返回的 id 合并进 self.items（去重），新增项默认勾选。
 
@@ -454,6 +498,7 @@ class MainWindow(QMainWindow):
         Ctrl+Shift+C            复制成功模型 ID 到剪贴板
         Ctrl+Shift+E            导出全部结果到 CSV
         Ctrl+Shift+R            拉取模型清单
+        Ctrl+Shift+L            重置模型清单（恢复内置）
         Ctrl+T                  开始/停止测试（按当前状态切换）
         """
         # 选择类快捷键挂在表格上（WidgetWithChildrenShortcut），
@@ -482,6 +527,9 @@ class MainWindow(QMainWindow):
 
         self._shortcut_fetch = QShortcut(QKeySequence("Ctrl+Shift+R"), self)
         self._shortcut_fetch.activated.connect(self._start_fetch)
+
+        self._shortcut_reset_list = QShortcut(QKeySequence("Ctrl+Shift+L"), self)
+        self._shortcut_reset_list.activated.connect(self._reset_model_list)
 
         self._shortcut_toggle = QShortcut(QKeySequence("Ctrl+T"), self)
         self._shortcut_toggle.activated.connect(self._toggle_test)

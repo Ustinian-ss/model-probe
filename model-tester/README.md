@@ -5,6 +5,8 @@
 ## 功能
 
 - 可配置多个 Provider，可切换当前 Provider
+- **每个 Provider 独立维护模型清单**：切换 Provider 自动载入各自的清单（含各自的拉取结果），互不累计；首次使用回退内置清单
+- **「重置列表」按钮**（Ctrl+Shift+L）：一键清空当前 Provider 的清单（含拉取结果），恢复内置模型清单
 - Provider 内容包括 Name、Base URL、API Key、超时时间、并发数
 - 内置 Nvidia NIM 常见模型列表
 - 支持批量测试、停止测试、筛选模型
