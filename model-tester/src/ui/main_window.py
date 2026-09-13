@@ -137,8 +137,12 @@ class MainWindow(QMainWindow):
         self.provider = self.providers[0]
         self.setWindowTitle(f"测试模型连接: {self.provider.name}")
 
-        self.items = model_store.load_model_items()
-        if not self.items and model_store.LAST_LOAD_ERROR:
+        self.items = self._initial_items_for(self.provider)
+        if (
+            not self.items
+            and self._is_builtin_catalog_provider(self.provider)
+            and model_store.LAST_LOAD_ERROR
+        ):
             QMessageBox.warning(
                 self, "内置模型清单缺失",
                 model_store.LAST_LOAD_ERROR + "\n\n可点击「拉取模型」从 Provider 获取清单。",
@@ -191,9 +195,17 @@ class MainWindow(QMainWindow):
 
         self.reset_list_button = QPushButton("重置列表")
         self.reset_list_button.setToolTip(
-            "手动清空当前 Provider 的模型清单（含拉取结果），恢复内置模型清单 (Ctrl+Shift+L)"
+            "手动清空当前 Provider 的模型清单（含拉取结果），恢复初始清单："
+            "NVIDIA 官方端点为内置清单，其他 Provider 为空 (Ctrl+Shift+L)"
         )
         self.reset_list_button.clicked.connect(self._reset_model_list)
+
+        self.builtin_list_button = QPushButton("加载内置清单")
+        self.builtin_list_button.setToolTip(
+            "把内置的 NVIDIA NIM 模型清单（config/models.json）并入当前 Provider 的清单（自动去重）"
+            " (Ctrl+Shift+B)"
+        )
+        self.builtin_list_button.clicked.connect(self._load_builtin_catalog)
 
         self.copy_button = QPushButton("复制 ID")
         self.copy_button.setToolTip("复制所有成功的模型 ID 到剪贴板 (Ctrl+Shift+C)")
@@ -233,6 +245,7 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.preferred_nonstream)
         controls.addWidget(self.fetch_button)
         controls.addWidget(self.reset_list_button)
+        controls.addWidget(self.builtin_list_button)
         controls.addWidget(self.copy_button)
         controls.addWidget(self.export_button)
         controls.addWidget(self.clear_results_button)
@@ -249,6 +262,22 @@ class MainWindow(QMainWindow):
         container.setLayout(layout)
         self.setCentralWidget(container)
 
+    # ---------- 内置清单策略 ----------
+    _NVIDIA_CATALOG_HOST = "integrate.api.nvidia.com"
+
+    def _is_builtin_catalog_provider(self, provider: Provider) -> bool:
+        """只有 NVIDIA NIM 官方端点才预置内置模型清单（对第三方端点该清单基本无效）。"""
+        return self._NVIDIA_CATALOG_HOST in (provider.base_url or "")
+
+    def _initial_items_for(self, provider: Provider) -> list[ModelItem]:
+        """Provider 首次进入时的初始清单：
+        - NVIDIA NIM 官方端点：内置 models.json 清单（开箱即测）
+        - 其他 Provider：空清单，等「拉取模型」获取真实列表
+        """
+        if self._is_builtin_catalog_provider(provider):
+            return model_store.load_model_items()
+        return []
+
     def _change_provider(self, index: int) -> None:
         if 0 <= index < len(self.providers):
             # 如果从同一个 provider 切换到自己（重复点击），不清理
@@ -260,14 +289,21 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f"测试模型连接: {self.provider.name}")
             # 载入目标 Provider 自己的清单；首次使用该 Provider 则回退内置清单
             stored = self._provider_lists.get(self.provider.name)
-            self.items = list(stored) if stored is not None else model_store.load_model_items()
+            self.items = (
+                list(stored) if stored is not None else self._initial_items_for(self.provider)
+            )
             self.visible_items = list(self.items)
             self.table.set_items(self.visible_items)
             # 健壮性：切换 provider 后清空旧测试状态，避免误以为属于新 provider
             self._clear_results(silent=True)
-            self.progress_label.setText(
-                f"已切换到 {self.provider.name}，载入 {len(self.items)} 个模型，测试状态已清空"
-            )
+            if self.items:
+                self.progress_label.setText(
+                    f"已切换到 {self.provider.name}，载入 {len(self.items)} 个模型，测试状态已清空"
+                )
+            else:
+                self.progress_label.setText(
+                    f"已切换到 {self.provider.name}，清单为空——请「拉取模型」获取真实清单，或「加载内置清单」"
+                )
 
     def _add_provider(self) -> None:
         dialog = ProviderDialog(Provider(name=f"Provider {len(self.providers) + 1}"), self)
@@ -324,6 +360,13 @@ class MainWindow(QMainWindow):
     def _start_test(self) -> None:
         if not self.provider.api_key:
             QMessageBox.warning(self, "缺少 API Key", "请先配置 Provider API Key")
+            return
+
+        if not self.items:
+            QMessageBox.warning(
+                self, "清单为空",
+                "当前 Provider 的模型清单为空，请先「拉取模型」或「加载内置清单」。",
+            )
             return
 
         self._apply_table_selection()
@@ -447,10 +490,10 @@ class MainWindow(QMainWindow):
         self.fetch_button.setText("拉取模型")
 
     def _reset_model_list(self) -> None:
-        """手动清空当前 Provider 的模型清单，恢复内置清单。
+        """手动清空当前 Provider 的模型清单，恢复初始清单。
 
-        清除该 Provider 下「拉取」得到的模型与全部测试状态；
-        切换 Provider 时各自清单独立，此按钮用于把当前清单一键还原。
+        初始清单 = NVIDIA 官方端点的内置 models.json；其他 Provider 为空。
+        清除该 Provider 下「拉取」得到的模型与全部测试状态。
         """
         if self.worker and self.worker.isRunning():
             QMessageBox.warning(self, "测试进行中", "请先停止测试再重置列表。")
@@ -459,12 +502,41 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "正在拉取模型", "请等待拉取完成后再重置列表。")
             return
         removed = len(self.items)
-        self.items = model_store.load_model_items()
+        self.items = self._initial_items_for(self.provider)
         self.visible_items = list(self.items)
         self.table.set_items(self.visible_items)
         self.progress_label.setText(
-            f"已重置列表（移除 {removed} 个，恢复内置 {len(self.items)} 个），待测试"
+            f"已重置列表（移除 {removed} 个，当前 {len(self.items)} 个），待测试"
         )
+
+    def _load_builtin_catalog(self) -> None:
+        """手动把内置的 NVIDIA NIM 模型清单并入当前 Provider 的清单（去重，不覆盖已有项）。
+
+        适用于第三方 Provider 想顺带测某些内置模型 ID 的场景。
+        """
+        if self.worker and self.worker.isRunning():
+            QMessageBox.warning(self, "测试进行中", "请先停止测试再加载内置清单。")
+            return
+        if self.fetch_worker and self.fetch_worker.isRunning():
+            QMessageBox.warning(self, "正在拉取模型", "请等待拉取完成后再加载内置清单。")
+            return
+        builtin = model_store.load_model_items()
+        if not builtin:
+            QMessageBox.warning(
+                self, "内置清单缺失",
+                (model_store.LAST_LOAD_ERROR or "内置清单为空")
+                + "\n\n可点击「拉取模型」从 Provider 获取清单。",
+            )
+            return
+        added = self._merge_items([item.id for item in builtin])
+        if added == 0:
+            self.progress_label.setText(
+                f"内置清单已全部存在（当前共 {len(self.items)} 个），无新增"
+            )
+        else:
+            self.progress_label.setText(
+                f"已并入内置清单：新增 {added} 个，当前共 {len(self.items)} 个，待测试"
+            )
 
     def _merge_items(self, ids: list[str]) -> int:
         """把 provider 返回的 id 合并进 self.items（去重），新增项默认勾选。
@@ -498,7 +570,8 @@ class MainWindow(QMainWindow):
         Ctrl+Shift+C            复制成功模型 ID 到剪贴板
         Ctrl+Shift+E            导出全部结果到 CSV
         Ctrl+Shift+R            拉取模型清单
-        Ctrl+Shift+L            重置模型清单（恢复内置）
+        Ctrl+Shift+L            重置模型清单（恢复初始清单）
+        Ctrl+Shift+B            加载内置模型清单（并入当前）
         Ctrl+T                  开始/停止测试（按当前状态切换）
         """
         # 选择类快捷键挂在表格上（WidgetWithChildrenShortcut），
@@ -530,6 +603,9 @@ class MainWindow(QMainWindow):
 
         self._shortcut_reset_list = QShortcut(QKeySequence("Ctrl+Shift+L"), self)
         self._shortcut_reset_list.activated.connect(self._reset_model_list)
+
+        self._shortcut_builtin = QShortcut(QKeySequence("Ctrl+Shift+B"), self)
+        self._shortcut_builtin.activated.connect(self._load_builtin_catalog)
 
         self._shortcut_toggle = QShortcut(QKeySequence("Ctrl+T"), self)
         self._shortcut_toggle.activated.connect(self._toggle_test)
