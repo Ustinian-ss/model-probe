@@ -211,9 +211,15 @@ class MainWindow(QMainWindow):
         self.copy_button.setToolTip("复制所有成功的模型 ID 到剪贴板 (Ctrl+Shift+C)")
         self.copy_button.clicked.connect(self._copy_success_ids)
 
-        self.export_button = QPushButton("导出 CSV")
-        self.export_button.setToolTip("导出全部测试结果到 CSV (Ctrl+Shift+E)")
-        self.export_button.clicked.connect(self._export_csv)
+        self.export_button = QPushButton("导出可用")
+        self.export_button.setToolTip("导出测试成功的模型到 CSV (Ctrl+Shift+E)")
+        self.export_button.clicked.connect(lambda: self._export_csv(only_success=True))
+
+        self.export_all_button = QPushButton("导出全部")
+        self.export_all_button.setToolTip(
+            "导出全部模型（含失败/未测试）到 CSV，用于保留完整记录"
+        )
+        self.export_all_button.clicked.connect(lambda: self._export_csv(only_success=False))
 
         self.clear_results_button = QPushButton("清空结果")
         self.clear_results_button.setToolTip("清空所有测试状态 (Delete)")
@@ -248,6 +254,7 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.builtin_list_button)
         controls.addWidget(self.copy_button)
         controls.addWidget(self.export_button)
+        controls.addWidget(self.export_all_button)
         controls.addWidget(self.clear_results_button)
         controls.addWidget(self.start_button)
         controls.addWidget(self.stop_button)
@@ -568,7 +575,7 @@ class MainWindow(QMainWindow):
         Ctrl+A / D / I          选取（全选/全不选/反选）
         Delete                  清空所有测试结果
         Ctrl+Shift+C            复制成功模型 ID 到剪贴板
-        Ctrl+Shift+E            导出全部结果到 CSV
+        Ctrl+Shift+E            导出可用模型（状态为成功）到 CSV
         Ctrl+Shift+R            拉取模型清单
         Ctrl+Shift+L            重置模型清单（恢复初始清单）
         Ctrl+Shift+B            加载内置模型清单（并入当前）
@@ -596,7 +603,9 @@ class MainWindow(QMainWindow):
         self._shortcut_copy.activated.connect(self._copy_success_ids)
 
         self._shortcut_export = QShortcut(QKeySequence("Ctrl+Shift+E"), self)
-        self._shortcut_export.activated.connect(self._export_csv)
+        self._shortcut_export.activated.connect(
+            lambda: self._export_csv(only_success=True)
+        )
 
         self._shortcut_fetch = QShortcut(QKeySequence("Ctrl+Shift+R"), self)
         self._shortcut_fetch.activated.connect(self._start_fetch)
@@ -628,14 +637,32 @@ class MainWindow(QMainWindow):
         QGuiApplication.clipboard().setText(text)
         self.progress_label.setText(f"已复制 {len(successful)} 个可用模型 ID 到剪贴板")
 
-    def _export_csv(self) -> None:
-        """导出全部结果到 CSV。"""
-        if not self.items:
-            QMessageBox.information(self, "无数据", "模型清单为空，无可导出内容。")
-            return
-        default_name = f"model_test_{self.provider.name}.csv"
+    def _export_csv(self, only_success: bool = True) -> None:
+        """导出测试结果到 CSV。
+
+        only_success=True（默认）：只导出状态为 success 的“可用模型”；
+        only_success=False：导出全部模型（含失败/未测试），用于保留完整记录。
+        """
+        if only_success:
+            items = [it for it in self.items if it.status == "success"]
+            scope_label = "可用"
+            if not items:
+                QMessageBox.information(
+                    self, "无可用模型",
+                    "当前没有状态为\"成功\"的模型可导出，请先测试。",
+                )
+                return
+            default_name = f"model_test_{self.provider.name}_available.csv"
+        else:
+            items = list(self.items)
+            scope_label = "全部"
+            if not items:
+                QMessageBox.information(self, "无数据", "模型清单为空，无可导出内容。")
+                return
+            default_name = f"model_test_{self.provider.name}_all.csv"
+
         path, _ = QFileDialog.getSaveFileName(
-            self, "导出测试结果", default_name, "CSV 文件 (*.csv)"
+            self, f"导出{scope_label}模型测试结果", default_name, "CSV 文件 (*.csv)"
         )
         if not path:
             return
@@ -647,7 +674,7 @@ class MainWindow(QMainWindow):
                     "status", "latency_ms", "streaming",
                     "error", "response_preview",
                 ])
-                for it in self.items:
+                for it in items:
                     writer.writerow([
                         self.provider.name, it.id, it.vendor, it.name,
                         it.status,
@@ -657,7 +684,9 @@ class MainWindow(QMainWindow):
                         it.last_error or "",
                         it.response_preview or "",
                     ])
-            self.progress_label.setText(f"已导出 {len(self.items)} 条结果到 {path}")
+            self.progress_label.setText(
+                f"已导出 {len(items)} 条{scope_label}模型结果到 {path}"
+            )
         except OSError as exc:
             QMessageBox.warning(self, "导出失败", f"无法写入文件：{exc}")
 
