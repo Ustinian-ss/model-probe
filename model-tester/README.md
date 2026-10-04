@@ -35,3 +35,13 @@ python -m venv .venv
 
 - Provider 配置（含 **API Key 明文**）保存在 `~/.nvidia_model_tester/providers.json`。请勿在多用户机器或会被同步/备份到不受控位置的家目录上使用；必要时删除该文件即可清除 Key。
 - 保存时会自动留一份 `providers.json.bak`；解析失败时会备份为 `providers.json.corrupt`。
+
+## 流式响应健壮性
+
+流式解析（`src/tester.py` 的 `parse_sse_chunk_lines`，纯函数、可单测）处理了三个真实踩过的坑：
+
+- **只读 `delta.content` 会误判空响应**：推理模型（nemotron / gpt-oss 系列）的正文常常只在
+  `delta.reasoning_content` 里，现在两者都读；
+- **上游用 HTTP 200 裹错误体**（`Service temporarily overloaded` / `Internal server error`）：
+  以前会被当成成功并显示空内容，现在识别成失败并给出原因；
+- **有的上游不发 `data: [DONE]`**：以 `[DONE]` 或 `finish_reason` 任一出现作为正常收尾，不会挂死或误报。

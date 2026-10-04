@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable
 
 import httpx
 
@@ -14,6 +14,79 @@ from providers import Provider
 TEST_MESSAGES = [
     {"role": "user", "content": "Reply with OK"}
 ]
+
+
+def _error_message_from_payload(obj: Any) -> str | None:
+    """识别响应体里的错误对象（含 HTTP 200 裹错误体的形态）。"""
+    if not isinstance(obj, dict):
+        return None
+    error = obj.get("error")
+    if error:
+        if isinstance(error, dict):
+            message = error.get("message") or error.get("detail") or error
+        else:
+            message = error
+        return str(message)
+    if str(obj.get("type", "")).lower() == "error":
+        return str(obj.get("message") or obj)
+    return None
+
+
+def _error_message_from_body(body: str) -> str | None:
+    """非 SSE 响应体（普通 JSON）里的错误对象。"""
+    try:
+        return _error_message_from_payload(json.loads(body))
+    except json.JSONDecodeError:
+        return None
+
+
+def parse_sse_chunk_lines(lines: Iterable[str]) -> tuple[str, str | None]:
+    """纯函数：解析 SSE 文本行，返回 ``(累积文本, 错误信息)``。
+
+    - 同时读取 ``delta.content`` 与 ``delta.reasoning_content``：推理模型
+      （nemotron / gpt-oss 系列）的正文经常只在 reasoning_content 里，只读 content
+      会把它误报成 ``Empty streaming response``；
+    - 遇到 ``data: [DONE]`` 或某个 choice 的 ``finish_reason`` 即正常收尾：有的上游
+      不发 ``[DONE]``，不能因此挂死或误报空响应；
+    - ``data: {"error": ...}`` / ``{"type": "error"}`` 视为失败并返回错误信息。
+    """
+    parts: list[str] = []
+    for line in lines:
+        if not line:
+            continue
+        if line.startswith(":"):
+            continue
+        if not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if not data:
+            continue
+        if data == "[DONE]":
+            break
+
+        try:
+            obj = json.loads(data)
+        except json.JSONDecodeError:
+            # 非 JSON 的 data 块（少数上游的纯文本片段）：保留可读片段，别整段丢弃
+            parts.append(data[:80])
+            continue
+
+        error = _error_message_from_payload(obj)
+        if error is not None:
+            return "".join(parts).strip(), error
+
+        finished = False
+        for choice in obj.get("choices") or []:
+            delta = choice.get("delta") or {}
+            for field in ("content", "reasoning_content"):
+                chunk = delta.get(field)
+                if chunk:
+                    parts.append(str(chunk))
+            if choice.get("finish_reason"):
+                finished = True
+        if finished:
+            break
+    return "".join(parts).strip(), None
 
 
 @dataclass
@@ -118,7 +191,6 @@ class ProviderTester:
         payload: dict[str, Any],
         start: float,
     ) -> dict[str, Any]:
-        preview_parts: list[str] = []
         with client.stream("POST", url, headers=headers, json=payload) as response:
             if response.status_code >= 400:
                 body = response.read().decode("utf-8", errors="ignore")
@@ -126,26 +198,21 @@ class ProviderTester:
 
             content_type = response.headers.get("content-type", "")
             if "text/event-stream" not in content_type:
+                # 少数上游在 stream=True 时回普通 JSON：先识别错误对象，再退回旧行为取正文
                 body = response.read().decode("utf-8", errors="ignore")
-                preview_parts.append(body[:300])
+                error = _error_message_from_body(body)
+                if error:
+                    return self._result(False, RuntimeError(error), start)
+                text, sse_error = parse_sse_chunk_lines(body.splitlines())
+                if sse_error:
+                    return self._result(False, RuntimeError(sse_error), start)
+                preview = (text or body[:300]).strip()
             else:
-                for line in response.iter_lines():
-                    if line.startswith("data: "):
-                        data = line[6:]
-                        if data.strip() == "[DONE]":
-                            break
-                        try:
-                            obj = json.loads(data)
-                            choices = obj.get("choices") or []
-                            for choice in choices:
-                                delta = choice.get("delta") or {}
-                                content = delta.get("content")
-                                if content:
-                                    preview_parts.append(content)
-                        except json.JSONDecodeError:
-                            preview_parts.append(data[:80])
+                text, sse_error = parse_sse_chunk_lines(response.iter_lines())
+                if sse_error:
+                    return self._result(False, RuntimeError(sse_error), start)
+                preview = text.strip()
 
-        preview = "".join(preview_parts).strip()
         if not preview:
             return self._result(False, RuntimeError("Empty streaming response"), start)
 
