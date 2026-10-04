@@ -1,0 +1,8 @@
+# git hook 必须保持 LF：Windows 上 core.autocrlf=true 会把它 checkout 成 CRLF，
+# Git Bash 执行时就报 "bad interpreter: /bin/sh^M"。
+.githooks/* text eol=lf
+
+# Windows 脚本用 CRLF，记事本/自带 PowerShell ISE 打开更正常
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf

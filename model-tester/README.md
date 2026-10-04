@@ -46,16 +46,48 @@ python -m venv .venv
   以前会被当成成功并显示空内容，现在识别成失败并给出原因；
 - **有的上游不发 `data: [DONE]`**：以 `[DONE]` 或 `finish_reason` 任一出现作为正常收尾，不会挂死或误报。
 
-## 打包成 exe
+## 打包成 exe（重要：改了源码就必须重打包）
 
-改完 `src/` 里的源码后，exe **不会自动更新**，必须重新打包（否则用户双击的还是旧代码）：
+exe **不进版本库**（`.gitignore` 里有 `dist/` `build/` `*.exe`），所以仓库里只有源码；
+本机双击运行的 `NvidiaModelTester.exe` 必须由源码重新打包，否则跑的仍是旧代码。
+
+### 最省事：双击 `启动模型测试器.cmd`
+
+它每次先判断「`src/`、`config/`、`requirements.txt` 有没有比 exe 新」：
+
+- 有更新 → 自动重新打包（首次或大改约 1–3 分钟；之后命中增量缓存通常几秒），再启动；
+- 已是最新 → 直接启动，不浪费时间。
+
+### 手动打包
 
 ```powershell
 cd model-tester
-powershell -ExecutionPolicy Bypass -File build_exe.ps1
-# 产物：distNvidiaModelTester.exe（顶层那份 NvidiaModelTester.exe 记得一起复制覆盖）
+powershell -ExecutionPolicy Bypass -File build_exe.ps1              # 含 pip install（需要联网时）
+powershell -ExecutionPolicy Bypass -File build_exe.ps1 -SkipDeps    # 依赖没变，离线快速重打包
 ```
 
-`build_exe.ps1` 用的是 `--onefile --windowed --add-data "config;config"`，
-其中 `config/models.json`（内置模型清单）必须一起打进去，否则 exe 里清单是空的。
+`build_exe.ps1` 用 `--onefile --windowed --add-data "config;config"` 打包，并把产物
+**自动覆盖**顶层的 `NvidiaModelTester.exe`（以前要手动复制，忘了就会双击到旧代码，且复制失败还不报错）。
+`config/models.json`（内置模型清单）必须打进包，否则 exe 里清单是空的。
 
+### 只检查、不打包
+
+```powershell
+powershell -ExecutionPolicy Bypass -File rebuild-if-stale.ps1 -Check
+# 退出码：0 = 已是最新；10 = 需要重新打包
+```
+
+判断依据只算**真正打进包里的东西**（`src/`、`config/`、`requirements.txt`），并且忽略
+`__pycache__`/`.pyc` —— 否则跑一次测试就会把 exe 判成“旧”，每次双击都白等两分钟。
+
+### 提交前提醒（git hook）
+
+仓库带了一个 pre-commit 钩子：改了 `model-tester/src|config` 却没重打包时会提醒你
+（默认只提醒、不拦提交；要强制拦截：`MP_STRICT_EXE=1 git commit ...`）。启用一次即可：
+
+```bash
+git config core.hooksPath .githooks
+```
+
+> 两个 `.ps1` 含中文，**必须保存为 UTF-8 with BOM**：PowerShell 5.1 在没有 BOM 时按 GBK 解析，
+> 中文全角括号会把后面的引号“吃掉”，直接报语法错误。

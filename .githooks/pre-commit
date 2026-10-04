@@ -1,0 +1,41 @@
+#!/bin/sh
+# 改了 model-tester 的源码却没重新打包 exe？提交时提醒一下。
+#
+# exe 不进版本库（.gitignore 里有 dist/ build/ *.exe），所以这条检查只针对
+# 「你本地双击用的那份 exe 是不是旧的」——2026-10-04 就是这么漏掉一次的。
+#
+# 默认只提醒、不拦截：拦提交会逼人到处加 --no-verify，反而更容易失效。
+# 想强制拦截：  MP_STRICT_EXE=1 git commit ...
+
+exe="model-tester/dist/NvidiaModelTester.exe"
+
+staged=$(git diff --cached --name-only -- \
+    'model-tester/src/*' \
+    'model-tester/config/*' \
+    'model-tester/*.spec' \
+    'model-tester/build_exe.ps1')
+[ -z "$staged" ] && exit 0
+
+hint() {
+    echo "   powershell -ExecutionPolicy Bypass -File model-tester/build_exe.ps1"
+    echo "   或者直接双击：model-tester/启动模型测试器.cmd（会自动判断要不要重打包）"
+}
+
+if [ ! -f "$exe" ]; then
+    echo "⚠  model-tester 源码有改动，但 exe 还没打包过 —— 双击运行的会是旧代码。"
+    hint
+    [ "$MP_STRICT_EXE" = "1" ] && exit 1
+    exit 0
+fi
+
+# 只看会打进包里的输入（源码 / 内置清单），忽略 __pycache__ 之类的中间产物
+newer=$(find model-tester/src model-tester/config -type f \
+    \( -name '*.py' -o -name '*.json' \) -newer "$exe" 2>/dev/null | head -5)
+[ -z "$newer" ] && exit 0
+
+echo "⚠  model-tester 源码比 exe 新，这次提交的代码用户双击时并不会生效："
+echo "     涉及：$(echo $newer | tr '\n' ' ')"
+hint
+echo "   （默认只提醒；想强制拦截：MP_STRICT_EXE=1 git commit ...）"
+[ "$MP_STRICT_EXE" = "1" ] && exit 1
+exit 0
