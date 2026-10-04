@@ -45,3 +45,17 @@ python -m venv .venv
 - **上游用 HTTP 200 裹错误体**（`Service temporarily overloaded` / `Internal server error`）：
   以前会被当成成功并显示空内容，现在识别成失败并给出原因；
 - **有的上游不发 `data: [DONE]`**：以 `[DONE]` 或 `finish_reason` 任一出现作为正常收尾，不会挂死或误报。
+
+## 打包成 exe
+
+改完 `src/` 里的源码后，exe **不会自动更新**，必须重新打包（否则用户双击的还是旧代码）：
+
+```powershell
+cd model-tester
+powershell -ExecutionPolicy Bypass -File build_exe.ps1
+# 产物：distNvidiaModelTester.exe（顶层那份 NvidiaModelTester.exe 记得一起复制覆盖）
+```
+
+`build_exe.ps1` 用的是 `--onefile --windowed --add-data "config;config"`，
+其中 `config/models.json`（内置模型清单）必须一起打进去，否则 exe 里清单是空的。
+
